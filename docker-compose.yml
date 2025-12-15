@@ -1,0 +1,58 @@
+version: '3.8'
+
+services:
+  # 1. RabbitMQ
+  rabbitmq:
+    image: rabbitmq:3-management
+    ports:
+      - "15672:15672"
+      - "5672:5672"
+    healthcheck:
+      test: ["CMD", "rabbitmqctl", "status"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # 2. PostgreSQL
+  postgres:
+    image: postgres:latest
+    environment:
+      POSTGRES_USER: postgre
+      POSTGRES_PASSWORD: admin
+      POSTGRES_DB: logs_db
+    ports:
+      - "5432:5432"
+
+  # 3. Наши сервисы
+  logger:
+    build:
+      context: .
+      dockerfile: LoggerService/Dockerfile
+    environment:
+      - RABBITMQ_HOST=rabbitmq
+      - DB_CONNECTION_STRING=Host=postgres;Port=5432;Database=logs_db;Username=postgre;Password=admin
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+      postgres:
+        condition: service_started
+
+  producer:
+    build:
+      context: .
+      dockerfile: Producer/Dockerfile
+    environment:
+      - RABBITMQ_HOST=rabbitmq
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+
+  consumer:
+    build:
+      context: .
+      dockerfile: Consumer/Dockerfile
+    environment:
+      - RABBITMQ_HOST=rabbitmq
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
