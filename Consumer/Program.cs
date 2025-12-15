@@ -35,8 +35,8 @@ consumer.ReceivedAsync += async (model, ea) => // Обработка получ�
     {
         var msg = Encoding.UTF8.GetString(ea.Body.ToArray());// Преобразование массива байтов в строку
         Console.WriteLine($"[Consumer] Received: {msg}");// Вывод полученного сообщения
-        // Имитация ошибки (если в тексте есть слово "error")
-        if (msg.ToLower().Contains("error"))
+        // Имитация ошибки (если в тексте есть цифра 0)
+        if (msg.Contains("0"))
         {
             throw new InvalidOperationException("error detected in message content");// Генерация ошибки
         }

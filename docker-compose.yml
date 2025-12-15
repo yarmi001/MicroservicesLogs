@@ -1,7 +1,7 @@
 version: '3.8'
 
 services:
-  # 1. RabbitMQ
+  
   rabbitmq:
     image: rabbitmq:3-management
     ports:
@@ -13,24 +13,24 @@ services:
       timeout: 5s
       retries: 5
 
-  # 2. PostgreSQL
+
   postgres:
     image: postgres:latest
     environment:
-      POSTGRES_USER: postgre
+      POSTGRES_USER: postgres
       POSTGRES_PASSWORD: admin
       POSTGRES_DB: logs_db
     ports:
       - "5432:5432"
 
-  # 3. Наши сервисы
+  
   logger:
     build:
       context: .
       dockerfile: LoggerService/Dockerfile
     environment:
       - RABBITMQ_HOST=rabbitmq
-      - DB_CONNECTION_STRING=Host=postgres;Port=5432;Database=logs_db;Username=postgre;Password=admin
+      - DB_CONNECTION_STRING=Host=postgres;Port=5432;Database=logs_db;Username=postgres;Password=admin
     depends_on:
       rabbitmq:
         condition: service_healthy

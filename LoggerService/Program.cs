@@ -1,69 +1,89 @@
 ﻿using System.Text;
 using System.Text.Json;
+using Common;             // Тут лежит LogEntry и ErrorSender
+using LoggerService;      // Тут лежит AppDbContext
 using RabbitMQ.Client;
-using Common;
 using RabbitMQ.Client.Events;
-using LoggerService;
 
-Console.WriteLine("Logger Service is starting...");// Вывод сообщения о запуске сервиса
+Console.WriteLine("--- Logger Service Starting ---");
 
-using (var dbContext = new AppDbContext())//Инициализация Бд
+// 1. Инициализация БД и создание таблицы
+using (var db = new AppDbContext())
 {
-    bool dbConnected = false; // Флаг подключения к базе данных
-    while (!dbConnected)// Цикл до успешного подключения к базе данных
+    bool dbConnected = false;
+    while (!dbConnected)
     {
         try
         {
-            await dbContext.Database.EnsureCreatedAsync(); // Попытка создать базу данных, если она не существует
+            await db.Database.EnsureCreatedAsync();
             dbConnected = true;
-            Console.WriteLine(
-                "Connected to the database successfully."); // Вывод сообщения об успешном подключении к базе данных
+            Console.WriteLine("--> БД подключена и инициализирована.");
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"Ожидание подключения к базе данных: {ex.Message}"); // Вывод сообщения об ошибке подключения к базе данных
+            Console.WriteLine($"--> Ожидание БД: {ex.Message}");
+            await Task.Delay(3000);
         }
     }
 }
 
-var hostName = Environment.GetEnvironmentVariable("RABBITMQ_HOST") ?? "localhost";// Получение имени хоста RabbitMQ из переменных окружения или использование значения по умолчанию
-var factory = new ConnectionFactory() { HostName = hostName };// Создание фабрики
-IConnection connection = null; // Инициализация подключения
+// 2. Подключение к RabbitMQ
+var hostName = Environment.GetEnvironmentVariable("RABBITMQ_HOST") ?? "localhost";
+var factory = new ConnectionFactory { HostName = hostName };
+IConnection connection = null;
 
 while (connection == null)
 {
     try
     {
-        connection = await factory.CreateConnectionAsync();// Попытка установить подключение к RabbitMQ
-        Console.WriteLine("RabbitMq подключен");// Вывод сообщения об успешном подключении к RabbitMQ
+        connection = await factory.CreateConnectionAsync();
+        Console.WriteLine("--> RabbitMQ подключен.");
     }
-    catch (Exception ex)
+    catch
     {
-        Console.WriteLine("Ожидание подключения к RabbitMq: " + ex.Message);// Вывод сообщения об ошибке подключения к RabbitMQ
-        await Task.Delay(5000);// Ожидание перед повторной попыткой подключения
+        Console.WriteLine("--> Ожидание RabbitMQ...");
+        await Task.Delay(3000);
     }
 }
 
-using var channel = await connection.CreateChannelAsync();// Создание канала для взаимодействия с RabbitMQ
-await channel.QueueDeclareAsync("error_queue", durable: true, exclusive: false, autoDelete: false);// Объявление очереди для ошибок
+using var channel = await connection.CreateChannelAsync();
 
-var consumer = new AsyncEventingBasicConsumer(channel);// Создание асинхронного потребителя сообщений
-consumer.ReceivedAsync += async (model, ea) => // Обработка полученных сообщений
+// Объявляем очередь (на всякий случай)
+await channel.QueueDeclareAsync("error_queue", durable: true, exclusive: false, autoDelete: false);
+
+Console.WriteLine(" [*] Ожидание сообщений об ошибках...");
+
+// 3. Настройка потребителя
+var consumer = new AsyncEventingBasicConsumer(channel);
+
+consumer.ReceivedAsync += async (model, ea) =>
 {
-    var body = ea.Body.ToArray();
-    var json = Encoding.UTF8.GetString(body);// Преобразование массива байтов в строку JSON
-    var logEntry = JsonSerializer.Deserialize<LogEntry>(json);// Десериализация JSON в объект LogEntry
-
-    if (logEntry == null)
+    try 
     {
-        using var dbContext = new AppDbContext();
-        await dbContext.Logs.AddAsync(logEntry!);// Добавление записи лога в базу данных
-        await dbContext.SaveChangesAsync();// Сохранение изменений в базе данных
-        Console.WriteLine($"[LoggerService] Logged error from {logEntry.ServiceName}: {logEntry.ErrorMessage}");// Вывод информации о сохраненном логе
+        var body = ea.Body.ToArray();
+        var json = Encoding.UTF8.GetString(body);
+        
+        // Десериализация
+        var logEntry = JsonSerializer.Deserialize<LogEntry>(json);
+
+        if (logEntry != null)
+        {
+            // Сохранение в БД
+            using var db = new AppDbContext();
+            await db.Logs.AddAsync(logEntry);
+            await db.SaveChangesAsync();
+            
+            Console.WriteLine($"[SAVED] Ошибка от {logEntry.ServiceName}: {logEntry.ErrorMessage}");
+        }
     }
-};
+    catch (Exception ex)
+    {
+        Console.WriteLine($"[ERROR] Не удалось сохранить лог: {ex.Message}");
+    }
+}; 
 
-await channel.BasicConsumeAsync("error_queue", autoAck: true, consumer: consumer);// Начало потребления сообщений из очереди
+// 4. Запуск прослушивания
+await channel.BasicConsumeAsync("error_queue", autoAck: true, consumer: consumer);
 
-Console.WriteLine("Logger запущен");// Вывод сообщения о запуске логгера
-await Task.Delay(Timeout.Infinite);// Бесконечное ожидание для поддержания работы сервиса
+// Вечное ожидание, чтобы контейнер не закрылся
+await Task.Delay(Timeout.Infinite);

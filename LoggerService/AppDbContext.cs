@@ -9,7 +9,7 @@ public class AppDbContext : DbContext
     
     protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder)
     {
-        var connectionString = Environment.GetEnvironmentVariable("DB_CONNECTION_STRING") ?? "Host=localhost;Database=logger_db;Username=postgres;Password=admin";// Получение строки подключения из переменных окружения или использование значения по умолчанию
+        var connectionString = Environment.GetEnvironmentVariable("DB_CONNECTION_STRING") ?? "Host=localhost;Database=logs_db;Username=postgres;Password=admin";// Получение строки подключения из переменных окружения или использование значения по умолчанию
         optionsBuilder.UseNpgsql(connectionString);// Настройка контекста данных для использования PostgreSQL
     }
 }
