@@ -63,10 +63,10 @@ graph TD
 
 ```text
 📂 MicroservicesLogs
-├── 📂 Common           # Общая библиотека (Models, Helpers)
-├── 📂 Producer         # Сервис-генератор задач
-├── 📂 Consumer         # Сервис-обработчик задач
-├── 📂 LoggerService    # Сервис логирования в БД
+├── 📂 Common             # Общая библиотека (Models, Helpers)
+├── 📂 Producer           # Сервис-генератор задач
+├── 📂 Consumer           # Сервис-обработчик задач
+├── 📂 LoggerService      # Сервис логирования в БД
 └── 🐳 docker-compose.yml # Конфигурация Docker Compose
 ```
 
