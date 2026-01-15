@@ -4,40 +4,49 @@ using RabbitMQ.Client;
 
 namespace Common;
 
-public class ErrorSender
+public class RabbitMqLogger
 {
-    private readonly IChannel _channel;// RabbitMQ канал
-    private readonly string _serviceName;//Название сервиса
-    // Конструктор класса ErrorSender
-    public ErrorSender(IChannel channel, string serviceName)
+    private readonly IChannel _channel;
+    private readonly string _serviceName;
+    private const string ExchangeName = "logs_exchange"; // Используем Exchange
+
+    public RabbitMqLogger(IChannel channel, string serviceName)
     {
         _channel = channel;
         _serviceName = serviceName;
     }
-    // Метод для отправки ошибки в очередь
-    public async Task SendErrorAsync(Exception ex)
-    {
-        try
-        {
-            var log = new LogEntry// Создание объекта LogEntry с информацией об ошибке
-            {
-                Id = Guid.NewGuid(),
-                ServiceName = _serviceName,
-                ErrorMessage = ex.Message,
-                StackTrace = ex.StackTrace ?? "No stack trace",
-                Timestamp = DateTime.UtcNow
-            };
-            var json = JsonSerializer.Serialize(log);// Сериализация объекта LogEntry в JSON
-            var body = Encoding.UTF8.GetBytes(json);// Преобразование JSON в массив байтов
 
-            await _channel.QueueDeclareAsync("error_queue", durable: true, exclusive: false, autoDelete: false);// Объявление очереди для ошибок
-            await _channel.BasicPublishAsync("", "error_queue", false, body);// Отправка сообщения в очередь
-            
-            Console.WriteLine($"[ErrorSender] Sent error log: {ex.Message}");// Вывод информации об отправленном сообщении
-        }
-        catch (Exception e)
+    // Инициализация (создаем обменник один раз)
+    public async Task InitializeAsync()
+    {
+        // Тип "topic" позволяет фильтровать по ключам (напр. "serviceA.error")
+        await _channel.ExchangeDeclareAsync(ExchangeName, ExchangeType.Topic, durable: true);
+    }
+
+    public async Task LogAsync(string message, LogType type, Exception? ex = null)
+    {
+        var log = new LogEntry
         {
-            Console.WriteLine($"[ErrorSender] Не удалось отправить лог: {e.Message}");// Вывод информации об ошибке при отправке сообщения
-        }
+            ServiceName = _serviceName,
+            Message = message,
+            Type = type,
+            StackTrace = ex?.ToString(),
+            Timestamp = DateTime.UtcNow
+        };
+
+        var json = JsonSerializer.Serialize(log);
+        var body = Encoding.UTF8.GetBytes(json);
+
+        // Routing Key: например "error.ProducerService" или "info.ConsumerService"
+        // Это отвечает на замечание №3 (разбиение сообщений)
+        var routingKey = $"{type.ToString().ToLower()}.{_serviceName}";
+
+        await _channel.BasicPublishAsync(
+            exchange: ExchangeName,
+            routingKey: routingKey, 
+            mandatory: false, 
+            basicProperties: new BasicProperties(), 
+            body: body
+        );
     }
 }

@@ -26,7 +26,7 @@ while (connection == null)
 using var channel = await connection.CreateChannelAsync();// Создание канала для взаимодействия с RabbitMQ
 await channel.QueueDeclareAsync("work_queue", false, false, false);// Объявление очереди для работы
 
-var errorSender = new ErrorSender(channel, "Consumer Service");// Инициализация отправителя ошибок
+var errorSender = new RabbitMqLogger(channel, "Consumer Service");// Инициализация отправителя ошибок
 
 var consumer = new AsyncEventingBasicConsumer(channel);// Создание асинхронного потребителя сообщений
 consumer.ReceivedAsync += async (model, ea) => // Обработка полученных сообщений
@@ -41,10 +41,10 @@ consumer.ReceivedAsync += async (model, ea) => // Обработка получ�
             throw new InvalidOperationException("error detected in message content");// Генерация ошибки
         }
     }
-    catch (Exception e)
+    catch 
     {
-        Console.WriteLine($"Ошибка при обработке сообщения: {e.Message}");// Вывод информации об ошибке при обработке сообщения
-        await errorSender.SendErrorAsync(e);
+        // Логирование ошибки
+        await errorSender.LogAsync("Error processing message", LogType.Error);
     }  
 };
 

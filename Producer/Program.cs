@@ -1,54 +1,76 @@
 ﻿using System.Text;
-using Common;
+using Common; // Убедись, что библиотека Common обновлена (содержит RabbitMqLogger и LogType)
 using RabbitMQ.Client;
 
-Console.WriteLine("Producer Service is starting...");// Вывод сообщения о запуске сервиса
+Console.WriteLine("Producer Service is starting...");
 
-var hostName = Environment.GetEnvironmentVariable("RABBITMQ_HOST") ?? "localhost";// Получение имени хоста RabbitMQ из переменных окружения или использование значения по умолчанию
-var factory = new ConnectionFactory() { HostName = hostName };// Создание фабрики
+// 1. Подключение к RabbitMQ с Retry Policy (простой вариант)
+var hostName = Environment.GetEnvironmentVariable("RABBITMQ_HOST") ?? "localhost";
+var factory = new ConnectionFactory() { HostName = hostName };
 
-IConnection connection = null; // Инициализация подключения
+IConnection connection = null;
 while (connection == null)
 {
     try
     {
-        connection = await factory.CreateConnectionAsync();// Попытка установить подключение к RabbitMQ
-        Console.WriteLine("RabbitMq подключен");// Вывод сообщения об успешном подключении к RabbitMQ
+        connection = await factory.CreateConnectionAsync();
+        Console.WriteLine("RabbitMq подключен");
     }
     catch (Exception ex)
     {
-        Console.WriteLine("Ожидание подключения к RabbitMq: " + ex.Message);// Вывод сообщения об ошибке подключения к RabbitMQ
-        await Task.Delay(5000);// Ожидание перед повторной попыткой подключения
+        Console.WriteLine("Ожидание подключения к RabbitMq: " + ex.Message);
+        await Task.Delay(3000); // 3 секунды паузы
     }
 }
 
-using var channel = await connection.CreateChannelAsync();// Создание канала для взаимодействия с RabbitMQ
-await channel.QueueDeclareAsync("work_queue", false, false, false);// Объявление очереди для ошибок
+using var channel = await connection.CreateChannelAsync();
 
-var errorSender = new ErrorSender(channel, "Producer Service");// Инициализация отправителя ошибок
+// 2. Объявляем очередь РАБОЧИХ ЗАДАЧ (Work Queue)
+// Сюда мы шлем задания для Consumer'а. Это НЕ логи.
+await channel.QueueDeclareAsync("work_queue", false, false, false);
+
+// 3. Инициализируем ЛОГГЕР (Log Exchange)
+// Сюда мы будем слать отчеты (Info, Error, Warning)
+var logger = new RabbitMqLogger(channel, "ProducerService");
+await logger.InitializeAsync(); // Важно: Создает Exchange "logs_exchange"
 
 int i = 0;
+
+Console.WriteLine("Starting work loop...");
 
 while (true)
 {
     i++;
     try
     {
-        //Имитируем работу сервиса
-        string msg = $"Work message #{i}"; // Создание сообщения
-        var body = Encoding.UTF8.GetBytes(msg); // Преобразование сообщения в массив байтов
-        await channel.BasicPublishAsync("", "work_queue", false, body); // Отправка сообщения в очередь
-        Console.WriteLine($"[Producer] Sent: {msg}"); // Вывод информации об отправленном сообщении
+        // --- БИЗНЕС ЛОГИКА ---
+        string msg = $"Work message #{i}";
+        var body = Encoding.UTF8.GetBytes(msg);
+        
+        // Отправляем задачу в очередь работникам (Consumer)
+        await channel.BasicPublishAsync("", "work_queue", false, body);
+        Console.WriteLine($"[Producer] Sent task: {msg}");
 
-        //Имитируем ошибку каждое пятое сообщение
+        // --- ЛОГИРОВАНИЕ (INFO) ---
+        // Отправляем информацию в систему логирования, что всё хорошо
+        await logger.LogAsync($"Task #{i} sent successfully", LogType.Info);
+
+        // Имитируем ошибку каждое 5-е сообщение
         if (i % 5 == 0)
         {
-            throw new InvalidOperationException($"Simulated exception at message #{i}"); // Генерация
+            throw new InvalidOperationException($"Simulated exception at message #{i}");
         }
+
+        await Task.Delay(1000); // Пауза 1 секунда между задачами
     }
     catch (Exception ex)
     {
-        await errorSender.SendErrorAsync(ex); // Отправка ошибки в очередь
-        await Task.Delay(5000);
+        Console.WriteLine($"[Producer] Caught error: {ex.Message}");
+        
+        // --- ЛОГИРОВАНИЕ (ERROR) ---
+        // Отправляем ошибку в систему логирования
+        await logger.LogAsync("Error during task processing", LogType.Error, ex);
+        
+        await Task.Delay(5000); // Пауза после ошибки
     }
 }
