@@ -7,11 +7,16 @@ services:
     ports:
       - "15672:15672"
       - "5672:5672"
+    environment:
+      - RABBITMQ_DEFAULT_USER=admin
+      - RABBITMQ_DEFAULT_PASS=admin
+      - RABBITMQ_ERLANG_COOKIE=my_secret_cookie_123
     healthcheck:
-      test: ["CMD", "rabbitmqctl", "status"]
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
       interval: 10s
-      timeout: 5s
-      retries: 5
+      timeout: 10s
+      retries: 10
+      start_period: 20s
 
 
   postgres:
@@ -22,15 +27,25 @@ services:
       POSTGRES_DB: logs_db
     ports:
       - "5432:5432"
-
+  
+  seq:
+    image: datalust/seq:latest
+    environment:
+      - ACCEPT_EULA=Y
+    ports:
+      - "5341:5341" 
+      - "8081:80"
+    restart: always
   
   logger:
     build:
       context: .
       dockerfile: LoggerService/Dockerfile
     environment:
-      - RABBITMQ_HOST=rabbitmq
-      - DB_CONNECTION_STRING=Host=postgres;Port=5432;Database=logs_db;Username=postgres;Password=admin
+      - LoggerSettings__RabbitMqHost=rabbitmq
+      - LoggerSettings__UserName=admin
+      - LoggerSettings__Password=admin
+      - LoggerSettings__ConnectionString=Host=postgres;Port=5432;Database=logs_db;Username=postgres;Password=admin
     depends_on:
       rabbitmq:
         condition: service_healthy
@@ -42,7 +57,10 @@ services:
       context: .
       dockerfile: Producer/Dockerfile
     environment:
-      - RABBITMQ_HOST=rabbitmq
+      - ProducerSettings__RabbitMqHost=rabbitmq
+      - ProducerSettings__UserName=admin
+      - ProducerSettings__Password=admin
+      - ProducerSettings__QueueName=work_queue
     depends_on:
       rabbitmq:
         condition: service_healthy
@@ -52,7 +70,10 @@ services:
       context: .
       dockerfile: Consumer/Dockerfile
     environment:
-      - RABBITMQ_HOST=rabbitmq
+      - ConsumerSettings__RabbitMqHost=rabbitmq
+      - ConsumerSettings__UserName=admin
+      - ConsumerSettings__Password=admin
+      - ConsumerSettings__QueueName=work_queue
     depends_on:
       rabbitmq:
         condition: service_healthy

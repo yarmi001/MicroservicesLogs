@@ -12,4 +12,7 @@ public class LoggerSettings
 
     [Range(1, 10000)]
     public int MaxBatchSize { get; set; } = 10;
+    
+    public string UserName {get; set; } = "guest";
+    public string Password { get; set; } = "guest";
 }
