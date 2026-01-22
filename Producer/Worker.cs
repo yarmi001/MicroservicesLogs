@@ -40,10 +40,8 @@ public class Worker : BackgroundService
                 _logger.LogWarning("Обнаружен разрыв соединения! Запускаю процедуру восстановления...");
                 
                 // Вызываем метод инициализации, внутри которого живет Polly.
-                // Он сам будет "долбиться" до кролика, пока тот не оживет.
                 await InitRabbitMqAsync(stoppingToken);
             }
-            // ----------------------------------
 
             i++;
             try
@@ -65,8 +63,7 @@ public class Worker : BackgroundService
             {
                 _logger.LogError("Ошибка в цикле Producer: {Error}", ex.Message);
                 
-                // ВАЖНО: Если упал сам Кролик, то отправить лог в Кролика тоже не выйдет.
-                // Поэтому оборачиваем в try-catch, чтобы не спамить ошибками логирования
+                // Оборачиваем в try-catch, чтобы не спамить ошибками логирования
                 try 
                 {
                     if (_mqLogger != null && _connection!.IsOpen)

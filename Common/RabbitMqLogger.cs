@@ -19,7 +19,6 @@ public class RabbitMqLogger
     }
 
     // 1. Инициализация (Создаем Exchange)
-    // Этот метод обязательно вызывать при старте сервиса
     public async Task InitializeAsync()
     {
         // Создаем обменник типа TOPIC. 
@@ -35,11 +34,11 @@ public class RabbitMqLogger
             // Формируем объект (DTO)
             var log = new LogEntry
             {
-                Id = Guid.NewGuid(), // Генерируем ID здесь (чтобы валидатор не ругался)
-                ServiceName = _serviceName, // Имя сервиса (Producer/Consumer)
+                Id = Guid.NewGuid(), // Генерируем ID здесь 
+                ServiceName = _serviceName, // Имя сервиса 
                 Message = message,
                 Type = type,
-                StackTrace = ex?.ToString(), // StackTrace нужен только если есть Exception
+                StackTrace = ex?.ToString(), // StackTrace 
                 Timestamp = DateTime.UtcNow
             };
 
@@ -47,7 +46,6 @@ public class RabbitMqLogger
             var body = Encoding.UTF8.GetBytes(json);
 
             // Генерируем Routing Key для гибкой фильтрации
-            // Пример: "info.ProducerService" или "error.ConsumerService"
             var routingKey = $"{type.ToString().ToLower()}.{_serviceName}";
 
             // Публикуем в EXCHANGE (а не в очередь напрямую)
@@ -59,8 +57,6 @@ public class RabbitMqLogger
                 body: body
             );
 
-            // Дублируем в консоль для отладки
-            // Console.WriteLine($"[RabbitMqLogger] Sent: {message}");
         }
         catch (Exception e)
         {

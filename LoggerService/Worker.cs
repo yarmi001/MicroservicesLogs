@@ -63,7 +63,6 @@ public class Worker : BackgroundService
         await Task.Delay(Timeout.Infinite, stoppingToken);
     }
 
-    // Это метод внутри LoggerService/Worker.cs (найди его у себя)
     private async Task ProcessLogForDatabaseAsync(BasicDeliverEventArgs ea)
     {
         try
@@ -80,7 +79,6 @@ public class Worker : BackgroundService
             var validationResult = await _validator.ValidateAsync(logEntry);
             if (!validationResult.IsValid) return;
 
-            // --- ИСПРАВЛЕНИЕ ЗДЕСЬ ---
             try 
             {
                 // Пытаемся создать Scope. Если приложение выключается, здесь вылетит ошибка.
@@ -103,13 +101,11 @@ public class Worker : BackgroundService
                 _logger.LogWarning("Приложение останавливается, сообщение не сохранено.");
                 return;
             }
-            // -------------------------
             _logger.LogInformation($"[DB SAVED] {logEntry.Type}: {logEntry.Message}");
         }
         catch (Exception ex)
         {
             _logger.LogError($"Error saving log: {ex.Message}");
-            // Можно сделать Nack, если ошибка не связана с выключением
         }
     }
     
@@ -118,7 +114,6 @@ public class Worker : BackgroundService
         var body = ea.Body.ToArray();
         var json = Encoding.UTF8.GetString(body);
         
-        // В реальном проекте тут была бы отправка SMS или Email
         _logger.LogWarning($" >>>>> [ALERT SYSTEM] Critical Error Detected! Payload: {json} <<<<<");
         
         await Task.CompletedTask;
@@ -150,8 +145,6 @@ public class Worker : BackgroundService
     private async Task InitRabbitMqAsync(CancellationToken token)
     {
         // 3. ИСПОЛЬЗУЕМ НАСТРОЙКИ ВМЕСТО ENVIRONMENT
-        // Было: Environment.GetEnvironmentVariable(...)
-        // Стало: _settings.RabbitMqHost
         
         var factory = new ConnectionFactory { 
             HostName = _settings.RabbitMqHost, 

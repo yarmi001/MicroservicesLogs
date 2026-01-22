@@ -1,6 +1,6 @@
 ﻿using System.ComponentModel.DataAnnotations;
 
-namespace Consumer.Settings; // Для Consumer поменяй namespace на Consumer.Settings
+namespace Consumer.Settings; 
 
 public class ConsumerSettings
 {

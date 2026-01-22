@@ -39,7 +39,7 @@ public class Worker : BackgroundService
             await ProcessMessageAsync(ea);
         };
 
-        // AutoAck = false (подтверждаем вручную)
+        // AutoAck = false 
         await _channel!.BasicConsumeAsync(_settings.QueueName, autoAck: false, consumer: consumer, cancellationToken: token);
     }
 
