@@ -6,6 +6,7 @@ using RabbitMQ.Client;
 using RabbitMQ.Client.Events;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using Polly;
 
 namespace Consumer;
 
@@ -72,23 +73,31 @@ public class Worker : BackgroundService
         var factory = new ConnectionFactory
         {
             HostName = _settings.RabbitMqHost,
-            UserName = _settings.UserName, // <--- ЛОГИН ИЗ КОНФИГА
-            Password = _settings.Password  // <--- ПАРОЛЬ ИЗ КОНФИГА
+            UserName = _settings.UserName, //  ЛОГИН ИЗ КОНФИГА
+            Password = _settings.Password  //  ПАРОЛЬ ИЗ КОНФИГА
         };
 
-        while (_connection == null && !token.IsCancellationRequested)
+        // 1. СОЗДАЕМ ПОЛИТИКУ (Правила повторов)
+        var retryPolicy = Policy
+            .Handle<Exception>() // Ловим любые ошибки (сеть, авторизация и т.д.)
+            .WaitAndRetryForeverAsync(
+                retryAttempt => TimeSpan.FromSeconds(Math.Min(Math.Pow(2, retryAttempt), 30)), 
+                (exception, timeSpan) =>
+                {
+                    _logger.LogWarning("RabbitMQ недоступен. Повтор через {Time} сек. Ошибка: {Error}", 
+                        timeSpan.TotalSeconds, exception.Message);
+                }
+            );
+
+        // 2. ВЫПОЛНЯЕМ ПОДКЛЮЧЕНИЕ (Внутри "пузыря" Polly)
+        await retryPolicy.ExecuteAsync(async (ct) =>
         {
-            try
-            {
-                _connection = await factory.CreateConnectionAsync(token);
-                _logger.LogInformation("Connected to RabbitMQ");
-            }
-            catch
-            {
-                _logger.LogWarning("Connecting to RabbitMQ...");
-                await Task.Delay(3000, token);
-            }
-        }
+            // Пытаемся подключиться. Если упадет - Polly поймает и повторит.
+            _connection = await factory.CreateConnectionAsync(ct);
+        }, token);
+
+        // 3. ЭТОТ КОД ВЫПОЛНИТСЯ ТОЛЬКО ПОСЛЕ УСПЕШНОГО ПОДКЛЮЧЕНИЯ
+        _logger.LogInformation("Успешное подключение к RabbitMQ через Polly!");
 
         _channel = await _connection!.CreateChannelAsync(cancellationToken: token);
 

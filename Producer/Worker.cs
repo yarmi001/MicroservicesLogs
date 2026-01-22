@@ -5,6 +5,8 @@ using Producer.Settings;
 using RabbitMQ.Client;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using Polly;
+using Polly.Retry;
 
 namespace Producer;
 
@@ -22,38 +24,55 @@ public class Worker : BackgroundService
         _settings = settings.Value;
     }
 
-    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
+   protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         _logger.LogInformation("Producer Worker стартует...");
+
+        // Первичное подключение
         await InitRabbitMqAsync(stoppingToken);
 
         int i = 0;
         while (!stoppingToken.IsCancellationRequested)
         {
+            // Проверяем: если соединение потеряно или канал закрыт
+            if (_connection == null || !_connection.IsOpen || _channel == null || !_channel.IsOpen)
+            {
+                _logger.LogWarning("Обнаружен разрыв соединения! Запускаю процедуру восстановления...");
+                
+                // Вызываем метод инициализации, внутри которого живет Polly.
+                // Он сам будет "долбиться" до кролика, пока тот не оживет.
+                await InitRabbitMqAsync(stoppingToken);
+            }
+            // ----------------------------------
+
             i++;
             try
             {
-                string msg = $"Task #{i}";
+                string msg = $"Work message #{i}";
                 var body = Encoding.UTF8.GetBytes(msg);
 
-                // Отправка задачи в Work Queue
                 await _channel!.BasicPublishAsync("", _settings.QueueName, false, body, cancellationToken: stoppingToken);
                 _logger.LogInformation("Sent: {Msg}", msg);
 
-                // Отправка Info лога в LoggerService
                 if (_mqLogger != null)
-                    await _mqLogger.LogAsync($"Task #{i} created", LogType.Info);
+                    await _mqLogger.LogAsync($"Task #{i} sent", LogType.Info);
 
-                // Имитация ошибки (каждое 10-е сообщение)
                 if (i % 10 == 0) throw new Exception($"Simulated error at #{i}");
 
                 await Task.Delay(1000, stoppingToken);
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Ошибка отправки");
-                if (_mqLogger != null)
-                    await _mqLogger.LogAsync("Producer Error", LogType.Error, ex);
+                _logger.LogError("Ошибка в цикле Producer: {Error}", ex.Message);
+                
+                // ВАЖНО: Если упал сам Кролик, то отправить лог в Кролика тоже не выйдет.
+                // Поэтому оборачиваем в try-catch, чтобы не спамить ошибками логирования
+                try 
+                {
+                    if (_mqLogger != null && _connection!.IsOpen)
+                        await _mqLogger.LogAsync("Error in Producer loop", LogType.Error, ex);
+                }
+                catch { /* Игнорируем ошибки логгера при разрыве сети */ }
                 
                 await Task.Delay(5000, stoppingToken);
             }
@@ -65,23 +84,30 @@ public class Worker : BackgroundService
         var factory = new ConnectionFactory
         {
             HostName = _settings.RabbitMqHost,
-            UserName = _settings.UserName, // <--- ВАЖНО: Используем логин из конфига
-            Password = _settings.Password  // <--- ВАЖНО: Используем пароль из конфига
+            UserName = _settings.UserName, // Используем логин из конфига
+            Password = _settings.Password  // Используем пароль из конфига
         };
 
-        while (_connection == null && !token.IsCancellationRequested)
+        var retryPolicy = Policy
+            .Handle<Exception>() // Ловим любые ошибки (сеть, авторизация и т.д.)
+            .WaitAndRetryForeverAsync(
+                retryAttempt => TimeSpan.FromSeconds(Math.Min(Math.Pow(2, retryAttempt), 30)), 
+                (exception, timeSpan) =>
+                {
+                    _logger.LogWarning("RabbitMQ недоступен. Повтор через {Time} сек. Ошибка: {Error}", 
+                        timeSpan.TotalSeconds, exception.Message);
+                }
+            );
+
+        // 2. ВЫПОЛНЯЕМ ПОДКЛЮЧЕНИЕ (Внутри "пузыря" Polly)
+        await retryPolicy.ExecuteAsync(async (ct) =>
         {
-            try
-            {
-                _connection = await factory.CreateConnectionAsync(token);
-                _logger.LogInformation("RabbitMQ Connected!");
-            }
-            catch
-            {
-                _logger.LogWarning("RabbitMQ недоступен. Жду 3 сек...");
-                await Task.Delay(3000, token);
-            }
-        }
+            // Пытаемся подключиться. Если упадет - Polly поймает и повторит.
+            _connection = await factory.CreateConnectionAsync(ct);
+        }, token);
+
+        // 3. ЭТОТ КОД ВЫПОЛНИТСЯ ТОЛЬКО ПОСЛЕ УСПЕШНОГО ПОДКЛЮЧЕНИЯ
+        _logger.LogInformation("Успешное подключение к RabbitMQ через Polly!");
 
         _channel = await _connection!.CreateChannelAsync(cancellationToken: token);
 
